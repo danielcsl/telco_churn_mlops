@@ -1,0 +1,4 @@
+author: Daniel
+model_type: scikit-learn_0.23
+project_name: telco_churn
+project_version: v0.1
