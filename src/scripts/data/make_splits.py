@@ -3,8 +3,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = PROJECT_ROOT / "data" / "raw"
-FILE = DATA_DIR/"telco_customer_churn.csv"
+DATA_DIR = PROJECT_ROOT / "data"
+FILE = DATA_DIR / "raw" / "telco_customer_churn.csv"
 
 def make_splits(test_size = 0.2, random_state = 42):
     df = pd.read_csv(FILE)
@@ -16,8 +16,17 @@ def make_splits(test_size = 0.2, random_state = 42):
         stratify=df['Churn'] # churn is imbalanced
     )
 
+    print("Full dataset churn rate:")
+    print(df["Churn"].value_counts(normalize=True))
+
+    print("\nTrain churn rate:")
+    print(train_df["Churn"].value_counts(normalize=True))
+
+    print("\nTest churn rate:")
+    print(test_df["Churn"].value_counts(normalize=True))
+
     processed_dir = DATA_DIR/"processed"
-    processed_dir.mkdir(exist_ok=True)
+    processed_dir.mkdir(parents = True, exist_ok=True)
     train_df.to_csv(processed_dir / "train.csv", index = False)
     test_df.to_csv(processed_dir / "test.csv", index = False)
     print(f'Train : {len(train_df)} rows, Test : {len(test_df)} rows')
