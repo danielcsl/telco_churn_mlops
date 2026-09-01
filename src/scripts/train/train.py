@@ -1,16 +1,13 @@
 from pathlib import Path
-import sys
 import json
+import sys
+
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.sklearn
-
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -18,97 +15,104 @@ from sklearn.metrics import (
     classification_report,
     roc_auc_score,
 )
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    confusion_matrix,
-    roc_auc_score,
-)
 
-# locating the deterministic_cleaning.py for funnction import
+# Find the root directory of the project.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.append(str(PROJECT_ROOT / 'src'))
+
+# Allow train.py to import files from src/.
+sys.path.append(str(PROJECT_ROOT / "src"))
+
+# Configure MLflow to use the project's local SQLite database.
+MLFLOW_DB_PATH = PROJECT_ROOT / "mlflow.db"
+mlflow.set_tracking_uri(f"sqlite:///{MLFLOW_DB_PATH}")
+
+# Store temporary files here before logging them as MLflow artifacts.
+RESULTS_DIR = PROJECT_ROOT / "results"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 from scripts.data.deterministic_cleaning import load_and_clean
 
-# create preprocess pipeline based on training feature types:
+
 def create_preprocessor(X_train):
+    """Create transformations for numeric and categorical input columns."""
 
     numerical_columns = X_train.select_dtypes(
-        include = ['int64', 'float64']
+        include=["int64", "float64"],
     ).columns.tolist()
 
     categorical_columns = X_train.select_dtypes(
-        include = ['object']
+        include=["object"],
     ).columns.tolist()
 
-    # setup the data cleaning pipeline
     numeric_pipeline = Pipeline(
-        steps = [
-            ('imputer', SimpleImputer(strategy='median')),
-            ('scaler', StandardScaler()),
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
         ]
     )
 
     categorical_pipeline = Pipeline(
-        steps = [
-            ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('one_hot_encoder', OneHotEncoder(handle_unknown='ignore')),
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("one_hot_encoder", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
 
-    # assemble the pipelines
     preprocessor = ColumnTransformer(
-        transformers = [
-            ('numeric', numeric_pipeline, numerical_columns),
-            ('categorical', categorical_pipeline, categorical_columns),
+        transformers=[
+            ("numeric", numeric_pipeline, numerical_columns),
+            ("categorical", categorical_pipeline, categorical_columns),
         ]
     )
 
     return preprocessor
 
-# assembling the preprocessor and logistic regression training
 
 def create_model_pipeline(X_train):
+    """Combine learned preprocessing and Logistic Regression."""
 
     preprocessor = create_preprocessor(X_train)
 
-    model_pipeline = Pipeline(
-        steps = [
-            ('preprocessor', preprocessor),
-            ('model', 
-             LogisticRegression(
-                max_iter = 1000,
-                class_weight='balanced',
-                random_state = 42,
+    pipeline = Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            (
+                "model",
+                LogisticRegression(
+                    max_iter=1000,
+                    class_weight="balanced",
+                    random_state=42,
                 ),
             ),
         ]
     )
 
-    return model_pipeline
+    return pipeline
 
-# function to train the base model
+
 def train_baseline_model():
-    
+    """Load, clean, split features/target, then fit the model pipeline."""
+
     train_df, test_df = load_and_clean()
 
-    X_train = train_df.drop(columns = ['Churn'])
-    y_train = train_df['Churn']
+    X_train = train_df.drop(columns=["Churn"])
+    y_train = train_df["Churn"]
 
-    X_test = test_df.drop(columns = ['Churn'])
-    y_test = test_df['Churn']
+    X_test = test_df.drop(columns=["Churn"])
+    y_test = test_df["Churn"]
 
     pipeline = create_model_pipeline(X_train)
 
     pipeline.fit(X_train, y_train)
 
-    return pipeline, X_test, y_test, len(X_train)
+    return pipeline, X_train, X_test, y_test
 
-# model evaluation
+
 def evaluate_model(pipeline, X_test, y_test):
-    """Evaluate the fitted pipeline on the held-out test set."""
+    """Calculate test-set metrics and create evaluation outputs."""
 
     y_pred = pipeline.predict(X_test)
 
@@ -121,8 +125,8 @@ def evaluate_model(pipeline, X_test, y_test):
     report = classification_report(
         y_test,
         y_pred,
-        labels = class_names,
-        output_dict= True,
+        labels=class_names,
+        output_dict=True,
     )
 
     metrics = {
@@ -137,21 +141,45 @@ def evaluate_model(pipeline, X_test, y_test):
         "churn_f1": report["Yes"]["f1-score"],
     }
 
-    print("\n===== Test Metrics =====")
-
-    for name, value in metrics.items():
-        print(f"{name}: {value:.4f}")
-
     return metrics, y_pred, report, class_names
 
-if __name__ == "__main__":
-    mlflow.sklearn.autolog(
-        log_models = True,
-        exclusive = False,
+
+def log_evaluation_artifacts(y_test, y_pred, report, class_names):
+    """Save and log a JSON report and confusion-matrix image."""
+
+    report_path = RESULTS_DIR / "classification_report.json"
+
+    with report_path.open("w") as file:
+        json.dump(report, file, indent=4)
+
+    mlflow.log_artifact(str(report_path), artifact_path="evaluation")
+
+    figure, axis = plt.subplots(figsize=(6, 5))
+
+    ConfusionMatrixDisplay.from_predictions(
+        y_test,
+        y_pred,
+        labels=class_names,
+        ax=axis,
+        cmap="Blues",
     )
 
+    axis.set_title("Telco Churn Confusion Matrix")
+
+    matrix_path = RESULTS_DIR / "confusion_matrix.png"
+
+    figure.savefig(matrix_path, bbox_inches="tight")
+
+    plt.close(figure)
+
+    mlflow.log_artifact(str(matrix_path), artifact_path="evaluation")
+
+
+if __name__ == "__main__":
+    mlflow.set_experiment("telco-churn-baseline")
+
     with mlflow.start_run(run_name="logistic-regression-balanced"):
-        pipeline, X_test, y_test, train_rows = train_baseline_model()
+        pipeline, X_train, X_test, y_test = train_baseline_model()
 
         metrics, y_pred, report, class_names = evaluate_model(
             pipeline,
@@ -167,7 +195,7 @@ if __name__ == "__main__":
                 "max_iter": model.max_iter,
                 "class_weight": str(model.class_weight),
                 "random_state": model.random_state,
-                "train_rows": train_rows,
+                "train_rows": len(X_train),
                 "test_rows": len(X_test),
             }
         )
@@ -183,30 +211,23 @@ if __name__ == "__main__":
             }
         )
 
-        with open("classification_report.json", "w") as file:
-            json.dump(report, file, indent=4)
-
-        mlflow.log_artifact("classification_report.json")
-
-        figure, axis = plt.subplots(figsize=(6, 5))
-
-        ConfusionMatrixDisplay.from_predictions(
+        log_evaluation_artifacts(
             y_test,
             y_pred,
-            labels=class_names,
-            ax=axis,
-            cmap="Blues",
+            report,
+            class_names,
         )
 
-        figure.savefig("confusion_matrix.png", bbox_inches="tight")
+        model_info = mlflow.sklearn.log_model(
+            sk_model=pipeline,
+            name="telco_churn_pipeline",
+            serialization_format="cloudpickle",
+        )
 
-        plt.close(figure)
+        print("\n===== Test Metrics =====")
 
-        mlflow.log_artifact("confusion_matrix.png")
+        for metric_name, metric_value in metrics.items():
+            print(f"{metric_name}: {metric_value:.4f}")
 
-    print("starting MLFLOW model Logging..")
-    mlflow.sklearn.log_model(
-        sk_model=pipeline,
-        artifact_path="model",
-    )
-    print("MLFLOW model logged")
+        print("\nMLflow model logged successfully.")
+        print(f"Model URI: {model_info.model_uri}")
