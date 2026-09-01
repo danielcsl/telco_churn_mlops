@@ -10,3 +10,5 @@ pytest
 pytest-dependency
 pre-commit
 kagglehub
+mlflow
+setuptools<82

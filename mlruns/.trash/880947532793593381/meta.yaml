@@ -1,0 +1,7 @@
+artifact_location: file:///Users/daniel/Documents/GitHub/telco_churn_mlops/mlruns/880947532793593381
+creation_time: 1788230404354
+experiment_id: '880947532793593381'
+last_update_time: 1788231619609
+lifecycle_stage: deleted
+name: telco-churn-baseline
+tags: {}

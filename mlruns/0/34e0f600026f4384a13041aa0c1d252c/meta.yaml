@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/daniel/Documents/GitHub/telco_churn_mlops/mlruns/0/34e0f600026f4384a13041aa0c1d252c/artifacts
+end_time: 1788231681212
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 34e0f600026f4384a13041aa0c1d252c
+run_name: spiffy-bee-462
+run_uuid: 34e0f600026f4384a13041aa0c1d252c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1788231679699
+status: 3
+tags: []
+user_id: daniel

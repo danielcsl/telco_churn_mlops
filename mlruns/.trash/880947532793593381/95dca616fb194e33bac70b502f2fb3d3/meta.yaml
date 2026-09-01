@@ -1,0 +1,16 @@
+artifact_uri: file:///Users/daniel/Documents/GitHub/telco_churn_mlops/mlruns/880947532793593381/95dca616fb194e33bac70b502f2fb3d3/artifacts
+deleted_time: 1788231619609
+end_time: 1788230406682
+entry_point_name: ''
+experiment_id: '880947532793593381'
+lifecycle_stage: deleted
+run_id: 95dca616fb194e33bac70b502f2fb3d3
+run_name: beautiful-shrew-0
+run_uuid: 95dca616fb194e33bac70b502f2fb3d3
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1788230404765
+status: 3
+tags: []
+user_id: daniel
