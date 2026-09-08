@@ -10,5 +10,5 @@ pytest
 pytest-dependency
 pre-commit
 kagglehub
-mlflow
+mlflow == 3.16.0
 setuptools<82

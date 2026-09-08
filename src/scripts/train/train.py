@@ -25,9 +25,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # Allow train.py to import files from src/.
 sys.path.append(str(PROJECT_ROOT / "src"))
 
-# Configure MLflow to use the project's local SQLite database.
+# Configure MLflow paths inside this project.
 MLFLOW_DB_PATH = PROJECT_ROOT / "mlflow.db"
-mlflow.set_tracking_uri(f"sqlite:///{MLFLOW_DB_PATH}")
+MLFLOW_ARTIFACTS_PATH = PROJECT_ROOT / "mlartifacts"
+
+MLFLOW_ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
+
+mlflow.set_tracking_uri(f"sqlite:///{MLFLOW_DB_PATH.as_posix()}")
+
+experiment_name = "telco-churn-baseline"
+
+try:
+    mlflow.create_experiment(
+        experiment_name,
+        artifact_location=f"file:///{MLFLOW_ARTIFACTS_PATH.as_posix()}",
+    )
+except mlflow.exceptions.MlflowException:
+    pass
+
+mlflow.set_experiment(experiment_name)
 
 # Store temporary files here before logging them as MLflow artifacts.
 RESULTS_DIR = PROJECT_ROOT / "results"
@@ -44,7 +60,7 @@ def create_preprocessor(X_train):
     ).columns.tolist()
 
     categorical_columns = X_train.select_dtypes(
-        include=["object"],
+        include=["object", "string"],
     ).columns.tolist()
 
     numeric_pipeline = Pipeline(
@@ -176,8 +192,7 @@ def log_evaluation_artifacts(y_test, y_pred, report, class_names):
 
 
 if __name__ == "__main__":
-    mlflow.set_experiment("telco-churn-baseline")
-
+    
     with mlflow.start_run(run_name="logistic-regression-balanced"):
         pipeline, X_train, X_test, y_test = train_baseline_model()
 
@@ -208,6 +223,7 @@ if __name__ == "__main__":
                 "dataset": "blastchar/telco-customer-churn",
                 "data_stage": "processed",
                 "model_status": "baseline",
+                "model_version": "baseline_v1",
             }
         )
 
@@ -218,9 +234,12 @@ if __name__ == "__main__":
             class_names,
         )
 
+        input_example = X_train.head(3)
+
         model_info = mlflow.sklearn.log_model(
             sk_model=pipeline,
             name="telco_churn_pipeline",
+            input_example = input_example,
             serialization_format="cloudpickle",
         )
 
