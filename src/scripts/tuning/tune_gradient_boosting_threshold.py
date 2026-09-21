@@ -29,6 +29,7 @@ MLFLOW_DB_PATH = PROJECT_ROOT / "mlflow.db"
 mlflow.set_tracking_uri(f"sqlite:///{MLFLOW_DB_PATH.as_posix()}")
 
 EXPERIMENT_NAME = "telco-churn-baseline"
+
 RESULTS_DIR = PROJECT_ROOT / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,7 +40,58 @@ CHAMPION_RECALL = 0.7834224598930482
 THRESHOLDS = [round(value / 100, 2) for value in range(10, 91, 5)]
 
 
+def load_tuned_run_params(model_version):
+    """Load parameters from the latest matching MLflow tuning run."""
+
+    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+
+    if experiment is None:
+        raise ValueError(
+            f"MLflow experiment '{EXPERIMENT_NAME}' was not found."
+        )
+
+    runs = mlflow.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.model_version = '{model_version}'",
+        order_by=["start_time DESC"],
+        max_results=1,
+    )
+
+    if runs.empty:
+        raise ValueError(
+            f"No MLflow run found for model_version='{model_version}'."
+        )
+
+    source_run_id = runs.iloc[0]["run_id"]
+    source_run = mlflow.get_run(source_run_id)
+
+    return {
+        "run_id": source_run_id,
+        "params": source_run.data.params,
+    }
+
+
+def parse_max_features(value):
+    """Convert MLflow's string parameter to sklearn's expected type."""
+
+    if value == "None":
+        return None
+
+    try:
+        numeric_value = float(value)
+
+        if numeric_value.is_integer():
+            return int(numeric_value)
+
+        return numeric_value
+
+    except ValueError:
+        return value
+
+
 def create_preprocessor(X_train):
+    """Create preprocessing for numeric and categorical features."""
+
     numerical_columns = X_train.select_dtypes(
         include=["int64", "float64"],
     ).columns.tolist()
@@ -70,7 +122,9 @@ def create_preprocessor(X_train):
     )
 
 
-def create_model_pipeline(X_train):
+def create_model_pipeline(X_train, params):
+    """Build Gradient Boosting using MLflow-loaded tuned parameters."""
+
     preprocessor = create_preprocessor(X_train)
 
     return Pipeline(
@@ -79,11 +133,20 @@ def create_model_pipeline(X_train):
             (
                 "model",
                 GradientBoostingClassifier(
-                    n_estimators=200,
-                    learning_rate=0.05,
-                    max_depth=3,
-                    min_samples_leaf=5,
-                    random_state=42,
+                    n_estimators=int(params["best_n_estimators"]),
+                    learning_rate=float(params["best_learning_rate"]),
+                    max_depth=int(params["best_max_depth"]),
+                    min_samples_split=int(
+                        params["best_min_samples_split"]
+                    ),
+                    min_samples_leaf=int(
+                        params["best_min_samples_leaf"]
+                    ),
+                    subsample=float(params["best_subsample"]),
+                    max_features=parse_max_features(
+                        params["best_max_features"]
+                    ),
+                    random_state=int(params["random_state"]),
                 ),
             ),
         ]
@@ -91,6 +154,8 @@ def create_model_pipeline(X_train):
 
 
 def select_threshold(pipeline, X_train, y_train):
+    """Select the threshold with best precision above champion recall."""
+
     cv = StratifiedKFold(
         n_splits=5,
         shuffle=True,
@@ -106,8 +171,7 @@ def select_threshold(pipeline, X_train, y_train):
         n_jobs=-1,
     )
 
-    churn_class_index = 1
-    churn_probabilities = cv_probabilities[:, churn_class_index]
+    churn_probabilities = cv_probabilities[:, 1]
 
     candidates = []
 
@@ -117,7 +181,12 @@ def select_threshold(pipeline, X_train, y_train):
             for probability in churn_probabilities
         ]
 
-        recall = recall_score(y_train, predictions, pos_label="Yes")
+        recall = recall_score(
+            y_train,
+            predictions,
+            pos_label="Yes",
+        )
+
         precision = precision_score(
             y_train,
             predictions,
@@ -136,23 +205,24 @@ def select_threshold(pipeline, X_train, y_train):
 
     if not candidates:
         raise ValueError(
-            "No threshold exceeded the champion recall during cross-validation."
+            "No threshold exceeded champion recall during CV."
         )
 
-    best_candidate = max(
+    return max(
         candidates,
         key=lambda candidate: candidate["cv_precision"],
     )
 
-    return best_candidate
-
 
 def evaluate_model(pipeline, X_test, y_test, threshold):
-    class_names = list(pipeline.named_steps["model"].classes_)
+    """Evaluate the final fitted pipeline at the selected threshold."""
 
+    class_names = list(pipeline.named_steps["model"].classes_)
     churn_class_index = class_names.index("Yes")
 
-    churn_probabilities = pipeline.predict_proba(X_test)[:, churn_class_index]
+    churn_probabilities = pipeline.predict_proba(X_test)[
+        :, churn_class_index
+    ]
 
     y_pred = [
         "Yes" if probability >= threshold else "No"
@@ -183,7 +253,12 @@ def evaluate_model(pipeline, X_test, y_test, threshold):
 
 
 def log_evaluation_artifacts(y_test, y_pred, report, class_names):
-    report_path = RESULTS_DIR / "random_forest_threshold_report.json"
+    """Save and log final evaluation artifacts."""
+
+    report_path = (
+        RESULTS_DIR
+        / "gradient_boosting_hyperparameter_threshold_report.json"
+    )
 
     with report_path.open("w") as file:
         json.dump(report, file, indent=4)
@@ -203,9 +278,14 @@ def log_evaluation_artifacts(y_test, y_pred, report, class_names):
         cmap="Blues",
     )
 
-    axis.set_title("Random Forest: Recall-Tuned Confusion Matrix")
+    axis.set_title(
+        "Gradient Boosting: Hyperparameter + Threshold-Tuned Matrix"
+    )
 
-    matrix_path = RESULTS_DIR / "random_forest_threshold_matrix.png"
+    matrix_path = (
+        RESULTS_DIR
+        / "gradient_boosting_hyperparameter_threshold_matrix.png"
+    )
 
     figure.savefig(matrix_path, bbox_inches="tight")
     plt.close(figure)
@@ -227,7 +307,17 @@ if __name__ == "__main__":
     X_test = test_df.drop(columns=["Churn"])
     y_test = test_df["Churn"]
 
-    pipeline = create_model_pipeline(X_train)
+    source_run = load_tuned_run_params(
+        "gradient_boosting_hyperparameter_tuned_v1"
+    )
+
+    print("\n===== Loaded Hyperparameter Run =====")
+    print(f"Source run ID: {source_run['run_id']}")
+
+    pipeline = create_model_pipeline(
+        X_train,
+        source_run["params"],
+    )
 
     threshold_result = select_threshold(
         pipeline,
@@ -248,17 +338,29 @@ if __name__ == "__main__":
 
     model = pipeline.named_steps["model"]
 
-    with mlflow.start_run(run_name="gradient-boosting-recall-tuned"):
-        mlflow.log_params(
-            {
-                "model_type": "GradientBoostingClassifier",
-                "n_estimators": model.n_estimators,
-                "learning_rate": model.learning_rate,
-                "max_depth": model.max_depth,
-                "min_samples_leaf": model.min_samples_leaf,
-                "random_state": model.random_state,
-            }
-        )
+    model_params = {
+        "model_type": "GradientBoostingClassifier",
+        "n_estimators": model.n_estimators,
+        "learning_rate": model.learning_rate,
+        "max_depth": model.max_depth,
+        "min_samples_split": model.min_samples_split,
+        "min_samples_leaf": model.min_samples_leaf,
+        "subsample": model.subsample,
+        "max_features": str(model.max_features),
+        "random_state": model.random_state,
+        "decision_threshold": selected_threshold,
+        "threshold_selection": (
+            "5-fold CV; recall > champion; max precision"
+        ),
+        "source_hyperparameter_run_id": source_run["run_id"],
+        "train_rows": len(X_train),
+        "test_rows": len(X_test),
+    }
+
+    with mlflow.start_run(
+        run_name="gradient-boosting-hyperparameter-threshold-tuned"
+    ):
+        mlflow.log_params(model_params)
 
         mlflow.log_metrics(
             {
@@ -272,8 +374,12 @@ if __name__ == "__main__":
             {
                 "project": "telco-churn-mlops",
                 "model_status": "challenger",
-                "model_version": "gradient_boosting_recall_tuned_v1",
-                "optimization_goal": "recall_above_current_champion",
+                "model_version": (
+                    "gradient_boosting_hyperparameter_threshold_tuned_v1"
+                ),
+                "optimization_goal": (
+                    "recall_above_current_champion"
+                ),
             }
         )
 
@@ -286,10 +392,17 @@ if __name__ == "__main__":
 
         model_info = mlflow.sklearn.log_model(
             sk_model=pipeline,
-            name="gradient_boosting_recall_tuned_pipeline",
+            name=(
+                "gradient_boosting_hyperparameter_"
+                "threshold_tuned_pipeline"
+            ),
             input_example=X_train.head(3),
             serialization_format="cloudpickle",
         )
+
+    print("\n===== Final Model Parameters =====")
+    for parameter_name, parameter_value in model_params.items():
+        print(f"{parameter_name}: {parameter_value}")
 
     print("\n===== Threshold Selection =====")
     print(f"Selected threshold: {selected_threshold:.2f}")
