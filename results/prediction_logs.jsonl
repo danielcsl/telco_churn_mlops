@@ -1,0 +1,4 @@
+{"timestamp_utc": "2026-10-08T15:05:47.203816+00:00", "model_uri": "models:/telco_churn_baseline@champion", "decision_threshold": 0.25, "churn_probability": 0.6771935674125426, "churn_prediction": "Yes"}
+{"timestamp_utc": "2026-10-08T15:05:50.149008+00:00", "model_uri": "models:/telco_churn_baseline@champion", "decision_threshold": 0.25, "churn_probability": 0.6771935674125426, "churn_prediction": "Yes"}
+{"timestamp_utc": "2026-10-08T15:05:50.841457+00:00", "model_uri": "models:/telco_churn_baseline@champion", "decision_threshold": 0.25, "churn_probability": 0.6771935674125426, "churn_prediction": "Yes"}
+{"timestamp_utc": "2026-10-08T15:12:32.797768+00:00", "model_uri": "models:/telco_churn_baseline@champion", "decision_threshold": 0.25, "churn_probability": 0.6771935674125426, "churn_prediction": "Yes"}
